@@ -99,6 +99,23 @@ func main() {
 		w.Write([]byte(urlpath))
 	})
 
-	fmt.Println("Listening on http://localhost:6040")
-	http.ListenAndServe(":6040", nil)
+	port := "6040"
+	for i, arg := range os.Args {
+		if strings.HasPrefix(arg, "-") {
+			switch strings.ToLower(arg) {
+			case "--port":
+			case "-p":
+				port = os.Args[i+1]
+			case "-h":
+				fmt.Println("Usage: fileserver [--port <port>] [-h]")
+				fmt.Println("Options:")
+				fmt.Printf("  --port <port>   Port to listen on (default: %s)\n", port)
+				fmt.Printf("  --help       	  Show this help message\n")
+				os.Exit(0)
+			}
+			continue
+		}
+	}
+	fmt.Printf("FileServer listening on http://localhost:%s\n", port)
+	http.ListenAndServe(":"+port, nil)
 }
