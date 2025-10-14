@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -16,26 +17,23 @@ func main() {
 	// Allows directory listing
 	// Allows file deletion
 	// Allows file renaming
+	var port string = "6040"
+	var dir string = "storage/"
 
 	http.HandleFunc("GET /{file...}", func(w http.ResponseWriter, r *http.Request) {
-		urlpath := r.URL.Path[1:]
-		if strings.HasPrefix(urlpath, "..") {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
-
+		urlpath := dir + r.URL.Path[1:]
 		if stat, err := os.Stat(urlpath); err == nil && !stat.IsDir() {
-			http.ServeFile(w, r, r.URL.Path[1:])
+			http.ServeFile(w, r, urlpath)
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			if !info.IsDir() && !strings.HasPrefix(path, ".") && strings.HasPrefix(path, urlpath) {
-				fmt.Fprintf(w, "%s\n", path)
+			if !info.IsDir() && strings.Contains(path, strings.TrimPrefix(urlpath, dir)) {
+				fmt.Fprintf(w, "%s\n", strings.TrimPrefix(path, dir))
 			}
 			return nil
 		})
@@ -43,11 +41,7 @@ func main() {
 
 	http.HandleFunc("POST /{file...}", func(w http.ResponseWriter, r *http.Request) {
 		// Get path parameter (supports slashes)
-		urlpath := r.URL.Path[1:]
-		if strings.HasPrefix(urlpath, "..") {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
+		urlpath := dir + r.URL.Path[1:]
 
 		// Create parent directories if they don't exist
 		if err := os.MkdirAll(filepath.Dir(urlpath), os.ModePerm); err != nil {
@@ -83,14 +77,15 @@ func main() {
 
 	http.HandleFunc("DELETE /{file...}", func(w http.ResponseWriter, r *http.Request) {
 		// Get path parameter (supports slashes)
-		urlpath := r.URL.Path[1:]
-		if strings.HasPrefix(urlpath, "..") {
-			http.Error(w, "invalid path", http.StatusBadRequest)
+		urlpath := dir + r.URL.Path[1:]
+
+		if _, err := os.Stat(urlpath); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		// Delete the file
-		if err := os.Remove(urlpath); err != nil {
+		if err := os.RemoveAll(urlpath); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -99,13 +94,23 @@ func main() {
 		w.Write([]byte(urlpath))
 	})
 
-	port := "6040"
 	for i, arg := range os.Args {
 		if strings.HasPrefix(arg, "-") {
 			switch strings.ToLower(arg) {
 			case "--port":
 			case "-p":
 				port = os.Args[i+1]
+				// Verify that the port is a number
+				if val, err := strconv.Atoi(port); err != nil || val < 1 || val > 65535 {
+					fmt.Println("Invalid port number")
+					os.Exit(1)
+				}
+			case "--dir":
+			case "-d":
+				dir = strings.TrimLeft(os.Args[i+1], "./")
+				if !strings.HasSuffix(dir, "/") {
+					dir += "/"
+				}
 			case "-h":
 				fmt.Println("Usage: fileserver [--port <port>] [-h]")
 				fmt.Println("Options:")

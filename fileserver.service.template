@@ -1,0 +1,14 @@
+[Unit]
+Description=Modern Golang FileSystem like Server
+Requires=network.target
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$PWD/fileserver --port ${PORT:-6040}
+Restart=on-failure
+User=$USER
+WorkingDirectory=$PWD/storage
+
+[Install]
+WantedBy=multi-user.target
