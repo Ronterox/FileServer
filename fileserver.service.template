@@ -5,10 +5,10 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=$PWD/fileserver --port ${PORT:-6040}
+ExecStart=$HOME/FileServer/fileserver --port ${PORT:-6040}
 Restart=on-failure
 User=$USER
-WorkingDirectory=$PWD/storage
+WorkingDirectory=$HOME/FileServer
 
 [Install]
 WantedBy=multi-user.target

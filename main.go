@@ -107,7 +107,7 @@ func main() {
 				}
 			case "--dir":
 			case "-d":
-				dir = strings.TrimLeft(os.Args[i+1], "./")
+				dir = strings.TrimPrefix(os.Args[i+1], "./")
 				if !strings.HasSuffix(dir, "/") {
 					dir += "/"
 				}
@@ -122,5 +122,7 @@ func main() {
 		}
 	}
 	fmt.Printf("FileServer listening on http://localhost:%s\n", port)
+	fmt.Println("Hosting directory:", dir)
+	fmt.Println("Press Ctrl+C to stop")
 	http.ListenAndServe(":"+port, nil)
 }
