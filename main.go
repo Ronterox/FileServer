@@ -10,6 +10,25 @@ import (
 	"strings"
 )
 
+// ProgressReader wraps a reader and reports progress
+type ProgressReader struct {
+	Reader   io.Reader
+	Total    int64
+	read     int64
+	Progress func(bytesRead int64)
+}
+
+func (pr *ProgressReader) Read(p []byte) (int, error) {
+	n, err := pr.Reader.Read(p)
+	pr.read += int64(n)
+
+	if pr.Progress != nil {
+		pr.Progress(pr.read)
+	}
+
+	return n, err
+}
+
 func main() {
 	// This should be a simple HTTP server that:
 	// Allows file downloads
@@ -40,39 +59,69 @@ func main() {
 	})
 
 	http.HandleFunc("POST /{file...}", func(w http.ResponseWriter, r *http.Request) {
-		// Get path parameter (supports slashes)
 		urlpath := dir + r.URL.Path[1:]
 
-		// Create parent directories if they don't exist
 		if err := os.MkdirAll(filepath.Dir(urlpath), os.ModePerm); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Get the file from the request
-		file, _, err := r.FormFile("file")
+		// Set headers for streaming response
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.WriteHeader(http.StatusOK)
+
+		// Flush the headers
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		// Parse multipart form
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			fmt.Fprintf(w, "Error: %v\n", err)
+			return
+		}
+
+		file, header, err := r.FormFile("file")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			fmt.Fprintf(w, "Error: %v\n", err)
 			return
 		}
 		defer file.Close()
 
-		// Write the uploaded file
+		fileSize := header.Size
 		out, err := os.Create(urlpath)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			fmt.Fprintf(w, "Error: %v\n", err)
 			return
 		}
 		defer out.Close()
 
-		if _, err := io.Copy(out, file); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		// Create progress reader that writes updates to response
+		progressReader := &ProgressReader{
+			Reader: file,
+			Total:  fileSize,
+			Progress: func(bytesRead int64) {
+				if fileSize > 0 {
+					percent := float64(bytesRead) / float64(fileSize) * 100
+					msg := fmt.Sprintf("Progress: %.1f%% (%d/%d bytes)\r",
+						percent, bytesRead, fileSize)
+					w.Write([]byte(msg))
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+				}
+			},
+		}
+
+		// Copy with progress
+		_, err = io.Copy(out, progressReader)
+		if err != nil {
+			fmt.Fprintf(w, "\nError: %v\n", err)
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(urlpath))
+		fmt.Fprintf(w, "\nUpload completed: %s\n", urlpath)
 	})
 
 	http.HandleFunc("DELETE /{file...}", func(w http.ResponseWriter, r *http.Request) {
