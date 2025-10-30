@@ -61,12 +61,34 @@ func main() {
 	http.HandleFunc("POST /{file...}", func(w http.ResponseWriter, r *http.Request) {
 		urlpath := dir + r.URL.Path[1:]
 
-		if err := os.MkdirAll(filepath.Dir(urlpath), os.ModePerm); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		// Parse multipart form FIRST, before any response writing
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			http.Error(w, "Error parsing multipart form: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		// Set headers for streaming response
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, "Error getting file from form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+
+		fileSize := header.Size
+
+		if err := os.MkdirAll(filepath.Dir(urlpath), os.ModePerm); err != nil {
+			http.Error(w, "Error creating directory: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		out, err := os.Create(urlpath)
+		if err != nil {
+			http.Error(w, "Error creating file: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer out.Close()
+
+		// Set headers for streaming response ONLY NOW
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
@@ -75,27 +97,6 @@ func main() {
 		if flusher, ok := w.(http.Flusher); ok {
 			flusher.Flush()
 		}
-
-		// Parse multipart form
-		if err := r.ParseMultipartForm(32 << 20); err != nil {
-			fmt.Fprintf(w, "Error: %v\n", err)
-			return
-		}
-
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			fmt.Fprintf(w, "Error: %v\n", err)
-			return
-		}
-		defer file.Close()
-
-		fileSize := header.Size
-		out, err := os.Create(urlpath)
-		if err != nil {
-			fmt.Fprintf(w, "Error: %v\n", err)
-			return
-		}
-		defer out.Close()
 
 		// Create progress reader that writes updates to response
 		progressReader := &ProgressReader{
@@ -117,11 +118,11 @@ func main() {
 		// Copy with progress
 		_, err = io.Copy(out, progressReader)
 		if err != nil {
-			fmt.Fprintf(w, "\nError: %v\n", err)
+			fmt.Fprintf(w, "\nError during copy: %v\n", err)
 			return
 		}
 
-		fmt.Fprintf(w, "\nUpload completed: %s\n", urlpath)
+		fmt.Fprintf(w, "Upload completed: %s\n", urlpath)
 	})
 
 	http.HandleFunc("DELETE /{file...}", func(w http.ResponseWriter, r *http.Request) {
